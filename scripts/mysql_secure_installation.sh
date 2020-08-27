@@ -15,6 +15,8 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA
 
+# Pass parameters inline instead of prompting for reads. (ie. mysql_secure_installation -r "rootpassword" -u "y" ...)
+# ROOTPASSWORD and NEWROOTPASSWORD should be strings, all others are booleans (y/n)
 while getopts r:u:n:a:d:t:p: option
 do
         case "${option}"
