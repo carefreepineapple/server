@@ -15,6 +15,20 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA
 
+while getopts r:u:n:a:d:t:p: option
+do
+        case "${option}"
+        in
+                r) ROOTPASSWORD=${OPTARG};;
+                u) UNIXAUTHSET=${OPTARG};;
+                n) NEWROOTPASSWORD=${OPTARG};;
+                a) REMOVEANON=${OPTARG};;
+		d) DISALLOWREMOTEROOT=${OPTARG};;
+		t) REMOVETESTDB={OPTARG};;
+		p) RELOADPRIV={OPTARG};;
+        esac
+done
+
 config=".my.cnf.$$"
 command=".mysql.$$"
 output=".my.output.$$"
@@ -263,15 +277,19 @@ make_config() {
 get_root_password() {
     status=1
     while [ $status -eq 1 ]; do
-	stty -echo
-	echo $echo_n "Enter current password for root (enter for none): $echo_c"
-	read password
-	echo
-	stty echo
-	if [ "x$password" = "x" ]; then
-	    emptypass=1
+    	if ["x$ROOTPASSWORD" = "x" ]; then
+		stty -echo
+		echo $echo_n "Enter current password for root (enter for none): $echo_c"
+		read password
+		echo
+		stty echo
+		if [ "x$password" = "x" ]; then
+	    		emptypass=1
+		else
+	    		emptypass=0
+		fi
 	else
-	    emptypass=0
+		password=$ROOTPASSWORD
 	fi
 	rootpass=$password
 	make_config
@@ -286,19 +304,23 @@ get_root_password() {
 }
 
 set_root_password() {
-    stty -echo
-    echo $echo_n "New password: $echo_c"
-    read password1
-    echo
-    echo $echo_n "Re-enter new password: $echo_c"
-    read password2
-    echo
-    stty echo
+    if ["x$NEWROOTPASSWORD" = "x" ]; then
+    	stty -echo
+    	echo $echo_n "New password: $echo_c"
+    	read password1
+    	echo
+    	echo $echo_n "Re-enter new password: $echo_c"
+    	read password2
+    	echo
+    	stty echo
 
-    if [ "$password1" != "$password2" ]; then
-	echo "Sorry, passwords do not match."
-	echo
-	return 1
+    	if [ "$password1" != "$password2" ]; then
+		echo "Sorry, passwords do not match."
+		echo
+		return 1
+    	fi
+    else
+    	password1=$NEWROOTPASSWORD
     fi
 
     if [ "$password1" = "" ]; then
@@ -379,6 +401,22 @@ reload_privilege_tables() {
     fi
 }
 
+enable_unix_socket_auth() {
+	do_query "UPDATE mysql.global_priv SET priv=json_set(priv, '$.password_last_changed', UNIX_TIMESTAMP(), '$.plugin', 'mysql_native_password', '$.authentication_string', 'invalid', '$.auth_or', json_array(json_object(), json_object('plugin', 'unix_socket'))) WHERE User='root';"
+	if [ $? -eq 0 ]; then
+	 echo "Enabled successfully!"
+	 echo "Reloading privilege tables.."
+	 reload_privilege_tables
+	 if [ $? -eq 1 ]; then
+	  clean_and_exit
+	 fi
+	 echo
+	else
+	 echo "Failed!"
+	 clean_and_exit
+	fi
+}
+
 interrupt() {
     echo
     echo "Aborting!"
@@ -425,47 +463,43 @@ echo "can log into the MariaDB root user without the proper authorisation."
 echo
 
 while true ; do
-    if [ $emptypass -eq 1 ]; then
-	echo $echo_n "Enable unix_socket authentication? [Y/n] $echo_c"
+    if ["x$UNIXAUTHSET" = "x" ]; then
+    	if [ $emptypass -eq 1 ]; then
+		echo $echo_n "Enable unix_socket authentication? [Y/n] $echo_c"
+    	else
+		echo "You already have your root account protected, so you can safely answer 'n'."
+		echo
+		echo $echo_n "Switch to unix_socket authentication [Y/n] $echo_c"
+    	fi
+    	read reply
+    	validate_reply $reply && break
     else
-	echo "You already have your root account protected, so you can safely answer 'n'."
-	echo
-	echo $echo_n "Switch to unix_socket authentication [Y/n] $echo_c"
-    fi
-    read reply
-    validate_reply $reply && break
+    	reply=$UNIXAUTHSET
+	validate_reply $reply && break
 done
 
 if [ "$reply" = "n" ]; then
   echo " ... skipping."
 else
   emptypass=0
-  do_query "UPDATE mysql.global_priv SET priv=json_set(priv, '$.password_last_changed', UNIX_TIMESTAMP(), '$.plugin', 'mysql_native_password', '$.authentication_string', 'invalid', '$.auth_or', json_array(json_object(), json_object('plugin', 'unix_socket'))) WHERE User='root';"
-  if [ $? -eq 0 ]; then
-   echo "Enabled successfully!"
-   echo "Reloading privilege tables.."
-   reload_privilege_tables
-   if [ $? -eq 1 ]; then
-     clean_and_exit
-   fi
-   echo
-  else
-   echo "Failed!"
-   clean_and_exit
-  fi
+  enable_unix_socket_auth
 fi
 echo
 
 while true ; do
-    if [ $emptypass -eq 1 ]; then
-	echo $echo_n "Set root password? [Y/n] $echo_c"
+    if ["x$ROOTPASSWORD" = "x" ]; then
+    	if [ $emptypass -eq 1 ]; then
+		echo $echo_n "Set root password? [Y/n] $echo_c"
+    	else
+		echo "You already have your root account protected, so you can safely answer 'n'."
+		echo
+		echo $echo_n "Change the root password? [Y/n] $echo_c"
+    	fi
+    	read reply
+    	validate_reply $reply && break
     else
-	echo "You already have your root account protected, so you can safely answer 'n'."
-	echo
-	echo $echo_n "Change the root password? [Y/n] $echo_c"
-    fi
-    read reply
-    validate_reply $reply && break
+    	reply="y"
+	validate_reply $reply && break
 done
 
 if [ "$reply" = "n" ]; then
@@ -492,9 +526,13 @@ echo "production environment."
 echo
 
 while true ; do
-    echo $echo_n "Remove anonymous users? [Y/n] $echo_c"
-    read reply
-    validate_reply $reply && break
+    if ["x$REMOVEANON" = "x" ]; then
+    	echo $echo_n "Remove anonymous users? [Y/n] $echo_c"
+    	read reply
+    	validate_reply $reply && break
+    else
+        reply=$REMOVEANON
+	validate_reply $reply && break
 done
 if [ "$reply" = "n" ]; then
     echo " ... skipping."
@@ -512,9 +550,14 @@ echo "Normally, root should only be allowed to connect from 'localhost'.  This"
 echo "ensures that someone cannot guess at the root password from the network."
 echo
 while true ; do
-    echo $echo_n "Disallow root login remotely? [Y/n] $echo_c"
-    read reply
-    validate_reply $reply && break
+    if ["x$DISALLOWREMOTEROOT" = "x" ]; then
+    	echo $echo_n "Disallow root login remotely? [Y/n] $echo_c"
+    	read reply
+    	validate_reply $reply && break
+    else
+    	reply=$DISALLOWREMOTEROOT
+	validate_reply $reply && break
+    fi
 done
 if [ "$reply" = "n" ]; then
     echo " ... skipping."
@@ -534,9 +577,13 @@ echo "before moving into a production environment."
 echo
 
 while true ; do
-    echo $echo_n "Remove test database and access to it? [Y/n] $echo_c"
-    read reply
-    validate_reply $reply && break
+    if ["x$REMOVETESTDB" = "x" ]; then
+    	echo $echo_n "Remove test database and access to it? [Y/n] $echo_c"
+    	read reply
+    	validate_reply $reply && break
+    else
+    	reply=$REMOVETESTDB
+	validate_reply $reply && break
 done
 
 if [ "$reply" = "n" ]; then
@@ -556,9 +603,12 @@ echo "will take effect immediately."
 echo
 
 while true ; do
-    echo $echo_n "Reload privilege tables now? [Y/n] $echo_c"
-    read reply
-    validate_reply $reply && break
+    if ["x$RELOADPRIV" = "x" ]; then
+    	echo $echo_n "Reload privilege tables now? [Y/n] $echo_c"
+    	read reply
+    	validate_reply $reply && break
+    else
+    	reply=$RELOADPRIV
 done
 
 if [ "$reply" = "n" ]; then
