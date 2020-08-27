@@ -17,7 +17,7 @@
 
 # Pass parameters inline instead of prompting for reads. (ie. mysql_secure_installation -r "rootpassword" -u "y" ...)
 # ROOTPASSWORD and NEWROOTPASSWORD should be strings, all others are booleans (y/n)
-while getopts r:u:n:a:d:t:p: option
+while getopts r:u:n:a:d:t:p:s: option
 do
         case "${option}"
         in
@@ -28,6 +28,7 @@ do
 		d) DISALLOWREMOTEROOT=${OPTARG};;
 		t) REMOVETESTDB={OPTARG};;
 		p) RELOADPRIV={OPTARG};;
+		s) PROMPTROOTPWD={OPTARG};;
         esac
 done
 
@@ -280,11 +281,13 @@ get_root_password() {
     status=1
     while [ $status -eq 1 ]; do
     	if ["x$ROOTPASSWORD" = "x" ]; then
-		stty -echo
-		echo $echo_n "Enter current password for root (enter for none): $echo_c"
-		read password
-		echo
-		stty echo
+		if ["$PROMPTROOTPWD" = "y"]; then
+			stty -echo
+			echo $echo_n "Enter current password for root (enter for none): $echo_c"
+			read password
+			echo
+			stty echo
+		fi
 		if [ "x$password" = "x" ]; then
 	    		emptypass=1
 		else
